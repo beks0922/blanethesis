@@ -19,12 +19,11 @@ passenger_reclass <- read_sheet(
 ais_oct16 <- read_csv("data/ais/october2016.csv")
 
 # Reclassify vessel types
-ais_oct16 %>% 
+ais_oct16 <- ais_oct16 %>% 
   left_join(vessel_type_reclass, by = "VesselType") %>% 
   mutate(VesselName = str_to_lower(VesselName)) %>% 
   left_join(passenger_reclass, by = "VesselName", ) %>% 
   replace_na(list(PassengerType = "OtherPassenger")) %>% 
   mutate(ReclassifiedVesselType = ifelse(ReclassifiedVesselType == "Passenger", 
                                          PassengerType,
-                                         ReclassifiedVesselType)) %>% 
-  View()
+                                         ReclassifiedVesselType))
