@@ -35,14 +35,17 @@ vessel_density <- fall_pleasure %>%
 names(vessel_density) <- "count"
 
 # Assign rating by quantile
-vessel_quantiles <- c(
-  0,
-  quantile(values(vessel_density), 
-           c(0.33, 0.67, 1), 
-           na.rm = TRUE)
-)
-vessel_ratings <- classify(vessel_density, vessel_quantiles)
+vessel_quantiles <- quantile(values(vessel_density), 
+                             c(0.33, 0.67, 1), 
+                             na.rm = TRUE)
+vessel_ratings <- classify(vessel_density, 
+                           c(0, vessel_quantiles),
+                           include.lowest = TRUE)
 names(vessel_ratings) <- "rating"
+# Rename levels to avoid brackets
+vessel_levels <- levels(vessel_ratings)[[1]] %>% 
+  mutate(count = 1:3)
+levels(vessel_ratings) <- vessel_levels
 
 # Visualize it
 # Vessel density raster
