@@ -2,6 +2,7 @@ library(lubridate)
 library(sf)
 library(terra)
 library(tmap)
+sf_use_s2(FALSE)
 
 fall_pleasure <- ais_oct16 %>% 
   # Assign season based on month
@@ -33,11 +34,20 @@ vessel_density <- fall_pleasure %>%
   crop(study_area, mask = TRUE)
 names(vessel_density) <- "count"
 
+# Assign rating by quantile
+vessel_quantiles <- c(
+  0,
+  quantile(values(vessel_density), 
+           c(0.33, 0.67, 1), 
+           na.rm = TRUE)
+)
+vessel_ratings <- classify(vessel_density, vessel_quantiles)
+names(vessel_ratings) <- "rating"
+
 # Visualize it
-sf_use_s2(FALSE)
 # Vessel density raster
-tm_shape(vessel_density) +
-  tm_raster("count") +
+tm_shape(vessel_ratings) +
+  tm_raster("rating") +
   # Study area border
   tm_shape(study_area) +
   tm_borders()
