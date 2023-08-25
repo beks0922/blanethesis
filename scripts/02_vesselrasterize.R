@@ -50,8 +50,8 @@ create_vessel_raster <- function(vessel_df, season_type, template) {
   # Rename raster layer
   names(vessel_ratings) <- paste(season_type,collapse="_")
   
-  # Return a raster
-  vessel_ratings
+  # Return a vector
+  as.polygons(vessel_ratings)
 }
 
 vessel_density <- ais_seasons_2016 %>% 
@@ -59,4 +59,17 @@ vessel_density <- ais_seasons_2016 %>%
   group_map(create_vessel_raster, template = study_area_template) %>% 
   set_names(map_chr(., names))
 
+for (i in seq(length(vessel_density))) {
+  names(vessel_density[[i]]) <- "Rating"
+}
+
 saveRDS(vessel_density, "outputs/vessel_density.rds")
+
+#WALK 
+walk2(vessel_density, 
+      names(vessel_density), 
+      \(r, n) writeVector(r, 
+                          file.path("outputs/ais", str_glue("ais_{n}.shp")), 
+                          overwrite = TRUE))
+
+
