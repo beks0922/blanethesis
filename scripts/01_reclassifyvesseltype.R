@@ -9,24 +9,35 @@ vessel_type_reclass <- read_sheet(
   "https://docs.google.com/spreadsheets/d/1yixJkzDKr65gLkf_78YL0DBsRWEssa9q6SXRaM-0bmQ/edit?usp=sharing",
   sheet = "VesselType"
 )
+
 passenger_reclass <- read_sheet(
   "https://docs.google.com/spreadsheets/d/1yixJkzDKr65gLkf_78YL0DBsRWEssa9q6SXRaM-0bmQ/edit?usp=sharing",
   sheet = "PassengerType"
 ) %>% 
   mutate(VesselName = str_to_lower(VesselName))
 
-# Read AIS data
-ais_2016 <- read_csv(dir("data/ais", full.names=TRUE))
 
-# Reclassify vessel types
-ais_reclass_2016 <- ais_2016 %>% 
-  left_join(vessel_type_reclass, by = "VesselType") %>% 
-  mutate(VesselName = str_to_lower(VesselName)) %>% 
-  left_join(passenger_reclass, by = "VesselName", ) %>% 
-  replace_na(list(PassengerType = "OtherPassenger")) %>% 
-  mutate(ReclassifiedVesselType = ifelse(ReclassifiedVesselType == "Passenger", 
-                                         PassengerType,
-                                         ReclassifiedVesselType))
-#save output
-saveRDS(ais_reclass_2016, "outputs/ais/ais_reclass_2016.rds")
+ais_reclass <- function(year) {
+  #read in ais files
+  ais_files <- list.files("data/ais", 
+                          full.names=TRUE, 
+                          pattern = str_glue("{year}\\.csv$"))
+  ais_df <- map_df(ais_files, read_csv)
+  
+  #reclassify vessel types  
+  ais_reclass <- ais_df %>% 
+    left_join(vessel_type_reclass, by = "VesselType") %>% 
+    mutate(VesselName = str_to_lower(VesselName)) %>% 
+    left_join(passenger_reclass, by = "VesselName") %>% 
+    replace_na(list(ReclassifiedVesselType = "Other", 
+                    PassengerType = "OtherPassenger")) %>% 
+    mutate(ReclassifiedVesselType = ifelse(ReclassifiedVesselType == "Passenger", 
+                                           PassengerType,
+                                           ReclassifiedVesselType)) 
+  #save output
+  saveRDS(ais_reclass, str_glue("outputs/ais/ais_reclass_{year}.rds"))
+}
+
+walk(2016:2019, ais_reclass)
+
 
