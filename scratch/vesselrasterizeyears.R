@@ -1,85 +1,3 @@
-library(lubridate)
-library(sf)
-library(terra)
-library(tmap)
-library(tidyverse)
-sf_use_s2(FALSE)
-
-# Create raster template
-study_area <- st_read(here::here("data", "studyarea")) %>% 
-  st_crop(xmin = -122.6501, ymin = 37.5, xmax = -121, ymax = 38) %>% 
-  st_transform("EPSG:3488")
-study_area_template <- rast(ext(study_area), 
-                            resolution = 500,
-                            crs = "EPSG:3488")
-
-create_vessel_raster <- function (vessel_df, season_type, year, template) {
-  # Project lat lon to albers
-  vessel_albers <- vessel_df %>% 
-    st_as_sf(coords = c("LON", "LAT"),
-             crs = "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs") %>% 
-    st_transform("EPSG:3488") 
-  # Rasterize points
-  vessel_raster <- vessel_albers %>% 
-    rasterize(template, fun = "count") %>% 
-    crop(study_area, mask = TRUE) 
-  # Classify raster by quantile
-  vessel_quantiles <- quantile(values(vessel_raster), 
-                               c(0.33, 0.67, 1), 
-                               na.rm = TRUE) 
-  # Rename levels
-  vessel_ratings <- classify(vessel_raster, 
-                             c(0, vessel_quantiles),
-                             include.lowest = TRUE)
-  
-  # Rename levels in raster 
-  vessel_levels <- levels(vessel_ratings)[[1]] %>% 
-    transmute(value,
-              Rating = factor(1:3))
-  levels(vessel_ratings) <- vessel_levels
-  
-  # Rename raster layer
-  names(vessel_ratings) <- paste(season_type,collapse="_")
-  
-  # Return a vector
-  as.polygons(vessel_ratings)
-}
-
-for (year in c("2016", "2017", "2018")) {
-  #read in ais rds files by year
-  ais_year <- list.files("outputs/ais", full.names = TRUE, pattern = str_glue("{year}\\.rds"))
-  ais_year_df <- map_df(ais_year, readRDS)
-  #create season column
-  ais_season_year <- ais_year_df %>% 
-    mutate(season = case_when(
-      month(BaseDateTime) <= 3 ~ "Winter",
-      month(BaseDateTime) <= 6 ~ "Spring",
-      month(BaseDateTime) <= 9 ~ "Summer",
-      month(BaseDateTime) <= 12 ~ "Fall"))
-  
-  vessel_density <- ais_season_year %>% 
-    group_by(year(BaseDateTime), season, ReclassifiedVesselType) %>% 
-    group_map(create_vessel_raster, template = study_area_template) %>% 
-    set_names(map_chr(., names))
-  
-  for (i in seq(length(vessel_density))) 
-    names(vessel_density[[i]]) <- "Rating"
-}
-
-
-#WALK 
-walk2(vessel_density, 
-      names(vessel_density), 
-      \(r, n) {
-        year_file <- str_glue("vessel_density_{year}.rds")
-        readRDS(year_file) %>% 
-          extract2(n) %>% 
-          writeVector(file.path("outputs/ais", str_glue("ais_{year}_{n}.shp")), 
-                      overwrite = TRUE))
-      })
-saveRDS(vessel_density, "outputs/vessel_density_{year}.rds")
-}
-
 
 # =================
 # Instructions from Max:
@@ -104,6 +22,7 @@ library(terra)
 library(tmap)
 library(tidyverse)
 sf_use_s2(FALSE)
+
 
 # Create raster template
 study_area <- st_read(here::here("data", "studyarea")) %>% 
@@ -148,28 +67,80 @@ ais_rasterize <- function(year, template){
   }
 
 ais_rasters <- map_df(2016:2019, ais_rasterize, template = study_area_template)
+#save.image("outputs/ais/ais_rasters_byyear.RData") # Cannot save SpatRaster as RData object
 
-vessel_class <- function(data, keys) {
-  browser()
-  summed_vessels <- sum(rast(data$ais_raster), na.rm = TRUE)
-  keys %>% 
-    mutate(summed_ais_raster = list(summed_vessels))
+combine_years <- function(data_list){
+  nr_elements <- length(data_list)
+  comb <- data_list[[1]]
+  if(nr_elements>1){
+    for(i in 2:(nr_elements)){
+      comb <- merge(comb, data_list[[i]])
+    }
   }
+  return(comb)
+}
 
-vessel_density <- ais_rasters %>% 
-  group_by(season, ReclassifiedVesselType) %>% 
-  group_map(vessel_class)
+vessel_density <- ais_rasters %>%
+  group_by(season, ReclassifiedVesselType) %>%
+  summarize(ais_raster = list(combine_years(ais_raster)))
+
 
 save_rasters <- function(raster_list) {
-  for (i in 1:length(raster_list)) {
-    season <- raster_list[[i]]$season
-    vessel_type <- raster_list[[i]]$ReclassifiedVesselType
-    raster <- raster_list[[i]]$ais_raster
-    current_raster <- raster[[1]]
-    writeRaster(current_raster, filename = file.path("outputs/ais", str_glue("ais_{season}_{vessel_type}.tif")), 
+  for (i in 1:nrow(raster_list)) {
+    season <- raster_list$season[i]
+    vessel_type <- raster_list$ReclassifiedVesselType[i]
+    current_raster <- raster_list$ais_raster[[i]]
+    writeRaster(current_raster, filename = file.path("outputs/ais/", str_glue("ais_{season}_{vessel_type}.tif")), 
                 overwrite = TRUE)
   }
 }
 
 # Call the function to save the rasters using the existing vessel_density list
 save_rasters(vessel_density)
+
+# Write a function that mutates data into quantiles, adds Rating col, and saves polygons
+create_quantile_polys <- function(season_types, vessel_types) {
+  for (season_type in season_types) {
+    for (vessel_type in vessel_types) {
+      # Construct the file path using str_glue
+      raster_file <- str_glue("outputs/ais/ais_{season_type}_{vessel_type}.tif")
+      
+      # Read the saved raster using terra's rast function
+      vessel_raster <- rast(raster_file)
+      
+      # Calculate quantiles and create Ratings column
+      vessel_quantiles <- quantile(values(vessel_raster), c(0.33, 0.67, 1), na.rm = TRUE)
+      vessel_ratings <- classify(vessel_raster, c(0, vessel_quantiles), include.lowest = TRUE)
+      vessel_levels <- levels(vessel_ratings)[[1]] %>%
+        transmute(value, Rating = factor(1:3))
+      levels(vessel_ratings) <- vessel_levels
+      
+      # Rename raster layer
+      names(vessel_ratings) <- paste(season_type, vessel_type, collapse = "_")
+      
+      # Convert to polygons
+      polygons <- as.polygons(vessel_ratings)
+      
+      # Convert to an sf object
+      sf_polygons <- st_as_sf(polygons)
+      
+      # Save each polygon separately
+      output_filename <- str_glue("outputs/ais/ais_{season_type}_{vessel_type}.shp")
+      st_write(sf_polygons, output_filename)
+    }
+  }
+}
+
+# Usage example
+season_types <- c("Spring", "Summer", "Fall")
+vessel_types <- c("Cargo", "Tanker", "TugTow", "HSF", "Cruise", "OtherPassenger", "Pleasure", "Other")
+
+# Call the function to process and save the quantile polygons individually
+create_quantile_polys(season_types, vessel_types)
+
+
+
+
+
+
+
