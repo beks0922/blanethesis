@@ -150,10 +150,11 @@ ais_rasterize <- function(year, template){
 ais_rasters <- map_df(2016:2019, ais_rasterize, template = study_area_template)
 
 vessel_class <- function(data, keys) {
-  summed_vessels <- sum(rast(data$ais_raster))
+  browser()
+  summed_vessels <- sum(rast(data$ais_raster), na.rm = TRUE)
   keys %>% 
-    mutate(ais_raster = list(summed_vessels))
-}
+    mutate(summed_ais_raster = list(summed_vessels))
+  }
 
 vessel_density <- ais_rasters %>% 
   group_by(season, ReclassifiedVesselType) %>% 
